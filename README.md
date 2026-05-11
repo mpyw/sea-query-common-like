@@ -1,6 +1,6 @@
 # sea-query-common-like
 
-[![Coverage Status](https://coveralls.io/repos/github/yumemi-inc/sea-query-common-like/badge.svg?branch=support-sea-orm)](https://coveralls.io/github/yumemi-inc/sea-query-common-like?branch=support-sea-orm)
+[![Coverage Status](https://coveralls.io/repos/github/mpyw/sea-query-common-like/badge.svg?branch=main)](https://coveralls.io/github/mpyw/sea-query-common-like?branch=main)
 
 A Rust crate for enhancing [`sea_query`](https://docs.rs/sea-query/latest/sea_query/) with typical `LIKE` search support, including escape sequences for patterns (`%fuzzy%`, `prefix%`, `%suffix`) and multi-column fuzzy search.
 

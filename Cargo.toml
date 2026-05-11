@@ -5,7 +5,7 @@ authors = ["mpyw <mpyw628@gmail.com>"]
 edition = "2021"
 rust-version = "1.80.0"
 description = "A Rust crate for enhancing sea_query with typical LIKE search support, including escape sequences for patterns (%fuzzy%, prefix%, %suffix) and multi-column fuzzy search."
-repository = "https://github.com/yumemi-inc/sea-query-common-like"
+repository = "https://github.com/mpyw/sea-query-common-like"
 license = "MIT"
 include = ["/src", "LICENSE"]
 keywords = ["sea-orm", "sea-query", "sql", "LIKE", "search"]
@@ -20,7 +20,7 @@ default = []
 with-sea-orm = ["dep:sea-orm"]
 
 [dependencies]
-fancy-regex = { version = ">=0.13, <0.15", default-features = false }
+fancy-regex = { version = ">=0.13, <0.19", default-features = false }
 regex = { version = "1", default-features = false, features = ["unicode-gencat"] }
 sea-orm = { version = ">=1.0, <1.2", default-features = false, optional = true }
 sea-query = { version = ">=0.31, <0.33", default-features = false }
@@ -28,6 +28,6 @@ sea-query = { version = ">=0.31, <0.33", default-features = false }
 [dev-dependencies]
 sea-orm = { version = ">=1.0, <1.2", features = ["macros"] }
 sea-query = ">=0.31, <0.33"
-sqlformat = "0.3.5"
+sqlformat = ">=0.3.5, <0.6"
 sqlx = ">=0.7, <0.9"
 sqlx-postgres = ">=0.7, <0.9"
