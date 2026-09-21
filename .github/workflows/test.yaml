@@ -49,14 +49,14 @@ jobs:
       - name: Update dependencies
         run: |
           cargo remove sea-orm sea-query
-          cargo remove --dev sea-orm sea-query sqlx sqlx-postgres
+          cargo remove --dev sea-orm sea-query sqlx
           cargo add sea-query@${{ matrix.sea.sea-query }} --no-default-features
           cargo add --dev sea-query@${{ matrix.sea.sea-query }}
           if [ "${{ matrix.use-sea-orm }}" == "true" ]; then
             cargo add sea-orm@${{ matrix.sea.sea-orm }} --no-default-features --optional
             cargo add --dev sea-orm@${{ matrix.sea.sea-orm }} --features macros
           fi
-          cargo add --dev sqlx@${{ matrix.sqlx }} sqlx-postgres@${{ matrix.sqlx }}
+          cargo add --dev sqlx@${{ matrix.sqlx }} --features postgres
           cat << EOF >> "$GITHUB_STEP_SUMMARY"
           ## \`Cargo.toml\`
           \`\`\`toml
