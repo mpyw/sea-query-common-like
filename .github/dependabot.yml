@@ -7,6 +7,18 @@ updates:
     cooldown:
       default-days: 7
     groups:
+      # `sea-orm` requires an exact `sea-query` line, so the two only ever move
+      # together. Bumping one on its own leaves two `sea-query` majors in the
+      # tree, and `ColumnTrait::as_column_ref` then returns a `DynIden` that
+      # `IntoColumnRef` does not accept.
+      #
+      # First, because a dependency joins the first group it matches. No
+      # `update-types`, so majors are grouped too, which is the case that
+      # matters.
+      sea:
+        patterns:
+          - "sea-orm*"
+          - "sea-query*"
       cargo-minor:
         patterns: ["*"]
         update-types: ["minor", "patch"]
