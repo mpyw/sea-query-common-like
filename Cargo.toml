@@ -20,7 +20,7 @@ default = []
 with-sea-orm = ["dep:sea-orm"]
 
 [dependencies]
-fancy-regex = { version = ">=0.13, <0.19", default-features = false }
+fancy-regex = { version = ">=0.13, <0.20", default-features = false }
 regex = { version = "1", default-features = false, features = ["unicode-gencat"] }
 sea-orm = { version = ">=1.0, <1.2", default-features = false, optional = true }
 sea-query = { version = ">=0.31, <0.33", default-features = false }
