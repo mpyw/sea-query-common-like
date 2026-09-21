@@ -7,6 +7,18 @@ defaults:
     shell: bash -euo pipefail {0}
 
 jobs:
+  # ===========================================================================
+  # Every dependency combination this crate supports, on the compiler its users
+  # have.
+  #
+  # Stable, not nightly. A compatibility matrix answers "can someone use this",
+  # and the answer for a released dependency is the answer on a released
+  # compiler. `sea-orm 1.0` pins `sqlx ^0.7`, `sqlx-postgres 0.7.4` is the last
+  # of that line, and it does not compile on a nightly that has the never type
+  # fallback change (rust-lang/rust#148922). Nothing anyone can do about that:
+  # the code is upstream's and that line is finished. Running this on nightly
+  # made the matrix fail for a reason this repository cannot act on.
+  # ===========================================================================
   rust-test:
     timeout-minutes: 10
     runs-on: ubuntu-latest
@@ -22,6 +34,9 @@ jobs:
           - "0.7"
           - "0.8"
         exclude:
+          # `sea-orm 1.0` requires `sqlx ^0.7`, and both lines bring their own
+          # `libsqlite3-sys`, which links the same native library. Cargo cannot
+          # resolve the two together.
           - sea: { sea-orm: "1.0", sea-query: "0.31" }
             use-sea-orm: true
             sqlx: "0.8"
@@ -30,14 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Setup Rust stable toolchain
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rustfmt
-      - name: Install Coverage Tools
-        if: ${{ matrix.use-sea-orm }}
-        run: |
-          rustup component add llvm-tools-preview --toolchain nightly
-          cargo +nightly install cargo-llvm-cov
+        uses: dtolnay/rust-toolchain@stable
       - name: Update dependencies
         run: |
           cargo remove sea-orm sea-query
@@ -66,26 +74,46 @@ jobs:
       - name: Restore cache
         uses: Swatinem/rust-cache@v2
       - name: Check code (dependencies only)
-        run: cargo +nightly check ${{ steps.generate-flags.outputs.feature_flags }}
+        run: cargo check ${{ steps.generate-flags.outputs.feature_flags }}
       - name: Check code (with dev-dependencies)
-        run: cargo +nightly check --all-targets ${{ steps.generate-flags.outputs.feature_flags }}
+        run: cargo check --all-targets ${{ steps.generate-flags.outputs.feature_flags }}
       - name: Check test
+        run: cargo test ${{ steps.generate-flags.outputs.feature_flags }}
+
+  # ===========================================================================
+  # One combination on nightly, which is where a change on its way to stable
+  # shows up first. This is the early warning, and it is about this crate's own
+  # code: a failure here is something this repository can fix.
+  #
+  # No `cargo add` dance. The ranges in `Cargo.toml` resolve to the newest of
+  # each dependency on their own, which is the combination worth looking ahead
+  # for.
+  #
+  # Coverage is measured here because `cargo llvm-cov --doctests` needs
+  # nightly, and one run of it says as much as several: the matrix legs run the
+  # same tests over different dependency versions.
+  # ===========================================================================
+  nightly-and-coverage:
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+      - name: Install coverage tools
         run: |
-          if [ "${{ matrix.use-sea-orm }}" == "true" ]; then
-            cargo +nightly llvm-cov ${{ steps.generate-flags.outputs.feature_flags }} --doctests --lcov >> /tmp/coverage.lcov
-          else
-            cargo test ${{ steps.generate-flags.outputs.feature_flags }}
-          fi
-      - name: Coveralls Parallel
-        if: ${{ matrix.use-sea-orm }}
+          rustup component add llvm-tools-preview --toolchain nightly
+          cargo +nightly install cargo-llvm-cov
+      - name: Restore cache
+        uses: Swatinem/rust-cache@v2
+      - name: Check code (with dev-dependencies)
+        run: cargo +nightly check --all-targets --all-features
+      - name: Check test, with coverage
+        run: cargo +nightly llvm-cov --all-features --doctests --lcov >> /tmp/coverage.lcov
+      - name: Coveralls
         uses: coverallsapp/github-action@v2
         with:
           files: /tmp/coverage.lcov
-          flag-name: >-
-            sea-orm:${{ matrix.sea.sea-orm }}
-            sea-query:${{ matrix.sea.sea-query }}
-            sqlx:${{ matrix.sqlx }}
-          parallel: true
 
   rust-lint:
     timeout-minutes: 10
@@ -108,13 +136,3 @@ jobs:
         run: cargo clippy --all-features -- -D warnings
       - name: Check sort
         run: cargo sort -w -c
-
-  aggregate-coverages:
-    needs: rust-test
-    if: ${{ always() }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Coveralls Finished
-        uses: coverallsapp/github-action@v2
-        with:
-          parallel-finished: true
