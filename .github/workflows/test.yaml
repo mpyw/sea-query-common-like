@@ -13,49 +13,33 @@ jobs:
   #
   # Stable, not nightly. A compatibility matrix answers "can someone use this",
   # and the answer for a released dependency is the answer on a released
-  # compiler. `sea-orm 1.0` pins `sqlx ^0.7`, `sqlx-postgres 0.7.4` is the last
-  # of that line, and it does not compile on a nightly that has the never type
-  # fallback change (rust-lang/rust#148922). Nothing anyone can do about that:
-  # the code is upstream's and that line is finished. Running this on nightly
-  # made the matrix fail for a reason this repository cannot act on.
+  # compiler.
+  #
+  # `sea-query` and `sea-orm` have one supported line each, so they are left at
+  # what `Cargo.toml` says. Only `sqlx` varies here. No code in this crate uses
+  # it. The leg asks whether a user's `sqlx` can sit in the same tree as this
+  # crate.
+  #
+  # `sqlx 0.7` is not on the list. `sea-orm 2.0` cannot resolve against it.
   # ===========================================================================
   rust-test:
     timeout-minutes: 10
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        sea:
-          - { sea-orm: "1.0", sea-query: "0.31" }
-          - { sea-orm: "1.1", sea-query: "0.32" }
         use-sea-orm:
           - true
           - false
         sqlx:
-          - "0.7"
           - "0.8"
-        exclude:
-          # `sea-orm 1.0` requires `sqlx ^0.7`, and both lines bring their own
-          # `libsqlite3-sys`, which links the same native library. Cargo cannot
-          # resolve the two together.
-          - sea: { sea-orm: "1.0", sea-query: "0.31" }
-            use-sea-orm: true
-            sqlx: "0.8"
-          - sea: { sea-orm: "1.1", sea-query: "0.32" }
-            sqlx: "0.7"
+          - "0.9"
     steps:
       - uses: actions/checkout@v7
       - name: Setup Rust stable toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Update dependencies
         run: |
-          cargo remove sea-orm sea-query
-          cargo remove --dev sea-orm sea-query sqlx
-          cargo add sea-query@${{ matrix.sea.sea-query }} --no-default-features
-          cargo add --dev sea-query@${{ matrix.sea.sea-query }}
-          if [ "${{ matrix.use-sea-orm }}" == "true" ]; then
-            cargo add sea-orm@${{ matrix.sea.sea-orm }} --no-default-features --optional
-            cargo add --dev sea-orm@${{ matrix.sea.sea-orm }} --features macros
-          fi
+          cargo remove --dev sqlx
           cargo add --dev sqlx@${{ matrix.sqlx }} --features postgres
           cat << EOF >> "$GITHUB_STEP_SUMMARY"
           ## \`Cargo.toml\`

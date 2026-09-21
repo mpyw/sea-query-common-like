@@ -8,7 +8,7 @@
 
 use fancy_regex::Regex as FancyRegex;
 use regex::Regex;
-use sea_query::{Cond, Condition, Expr, IntoColumnRef, IntoLikeExpr, LikeExpr};
+use sea_query::{Cond, Condition, Expr, ExprTrait, IntoColumnRef, LikeExpr};
 use std::sync::LazyLock;
 
 #[cfg(feature = "with-sea-orm")]
@@ -50,7 +50,7 @@ static SEPARATOR_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\p{Zs}++
 /// # Examples
 ///
 /// ```
-/// use sea_query::{Expr, Iden, IntoLikeExpr, LikeExpr, PostgresQueryBuilder, SelectStatement};
+/// use sea_query::{Expr, ExprTrait, Iden, PostgresQueryBuilder, SelectStatement};
 /// use sea_query_common_like::prefix;
 /// use sqlformat::{format, FormatOptions, QueryParams};
 ///
@@ -118,7 +118,7 @@ pub fn prefix(text: impl Into<String>) -> Keyword {
 /// Create a suffix [`Keyword`] for `LIKE` search.
 ///
 /// ```
-/// use sea_query::{Expr, Iden, IntoLikeExpr, LikeExpr, PostgresQueryBuilder, SelectStatement};
+/// use sea_query::{Expr, ExprTrait, Iden, PostgresQueryBuilder, SelectStatement};
 /// use sea_query_common_like::suffix;
 /// use sqlformat::{format, FormatOptions, QueryParams};
 ///
@@ -188,7 +188,7 @@ pub fn suffix(text: impl Into<String>) -> Keyword {
 /// # Examples
 ///
 /// ```
-/// use sea_query::{Expr, Iden, IntoLikeExpr, LikeExpr, PostgresQueryBuilder, SelectStatement};
+/// use sea_query::{Expr, ExprTrait, Iden, PostgresQueryBuilder, SelectStatement};
 /// use sea_query_common_like::fuzzy;
 /// use sqlformat::{format, FormatOptions, QueryParams};
 ///
@@ -258,7 +258,7 @@ pub fn fuzzy(text: impl Into<String>) -> Keyword {
 /// # Examples
 ///
 /// ```
-/// use sea_query::{Expr, Iden, IntoLikeExpr, LikeExpr, PostgresQueryBuilder, SelectStatement};
+/// use sea_query::{Expr, ExprTrait, Iden, PostgresQueryBuilder, SelectStatement};
 /// use sea_query_common_like::fuzzy_separated;
 /// use sqlformat::{format, FormatOptions, QueryParams};
 ///
@@ -415,7 +415,7 @@ pub fn fuzzy_separated(text: impl Into<String>) -> Keywords {
 /// # Examples
 ///
 /// ```
-/// use sea_query::{Expr, Iden, IntoLikeExpr, LikeExpr, PostgresQueryBuilder, SelectStatement};
+/// use sea_query::{Expr, ExprTrait, Iden, PostgresQueryBuilder, SelectStatement};
 /// use sea_query_common_like::{fuzzy, keywords, prefix};
 /// use sqlformat::{format, FormatOptions, QueryParams};
 ///
@@ -513,12 +513,18 @@ impl From<&str> for Keyword {
 }
 
 /// Implement the conversion from [`Keyword`] to [`sea_query::LikeExpr`] for use in [`sea_query`].
-impl IntoLikeExpr for Keyword {
-    fn into_like_expr(self) -> LikeExpr {
-        LikeExpr::new(match self.ty {
-            KeywordType::Prefix => [&escape_like_value(&self.value), "%"].join(""),
-            KeywordType::Suffix => ["%", &escape_like_value(&self.value)].join(""),
-            KeywordType::Fuzzy => ["%", &escape_like_value(&self.value), "%"].join(""),
+///
+/// `sea_query::IntoLikeExpr` has a blanket implementation over `Into<LikeExpr>`, so this is
+/// the hook it offers.
+///
+/// Do not add `impl From<Keyword> for String`. `sea_query` carries
+/// `impl<T: Into<String>> From<T> for LikeExpr`, and the two would overlap (E0119).
+impl From<Keyword> for LikeExpr {
+    fn from(keyword: Keyword) -> Self {
+        LikeExpr::new(match keyword.ty {
+            KeywordType::Prefix => [&escape_like_value(&keyword.value), "%"].join(""),
+            KeywordType::Suffix => ["%", &escape_like_value(&keyword.value)].join(""),
+            KeywordType::Fuzzy => ["%", &escape_like_value(&keyword.value), "%"].join(""),
         })
         .escape(ESCAPE_CHAR)
     }
