@@ -1,0 +1,31 @@
+name: Tag and Release
+
+# Show the target version in the run title, e.g. "Tag and Release 1.2.3".
+run-name: "Tag and Release ${{ inputs.version }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g., 1.2.3 or 1.2.0-rc.1)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  # Passed down to the publish. A called workflow cannot ask for more than its
+  # caller was given.
+  id-token: write
+
+jobs:
+  tag:
+    uses: ./.github/workflows/tag.yaml
+    with:
+      version: ${{ inputs.version }}
+
+  release:
+    needs: [tag]
+    uses: ./.github/workflows/release.yaml
+    with:
+      version: ${{ inputs.version }}
+    secrets: inherit

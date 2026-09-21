@@ -1,0 +1,84 @@
+name: Tag
+
+# Show the target version in the run title, e.g. "Tag 1.2.3".
+run-name: "Tag ${{ inputs.version }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to tag (e.g., 1.2.3 or 1.2.0-rc.1)"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: "Version to tag (e.g., 1.2.3 or 1.2.0-rc.1)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      # The tags in this repository carry no `v`, and some carry a pre-release
+      # suffix. Both are what the five releases before this workflow used.
+      - name: Validate version format
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Error: Invalid version format '$VERSION'"
+            echo "Expected format: X.Y.Z or X.Y.Z-prerelease (e.g., 1.2.3, 1.2.0-rc.1)"
+            exit 1
+          fi
+          echo "Version format valid: $VERSION"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Nothing else would catch a version that says one thing here and another
+      # in the manifest, and `cargo publish` reads the manifest.
+      - name: Check the manifest says this version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          have=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          if [[ "$have" != "$VERSION" ]]; then
+            echo "Error: Cargo.toml says $have, and this run is for $VERSION"
+            exit 1
+          fi
+          echo "Cargo.toml says $VERSION"
+
+      # A retry of one version has to be able to reach this twice. A tag that
+      # is already on the commit being tagged is the state this step is for, so
+      # it is left alone. One pointing somewhere else is a different release
+      # wearing this name, and is refused.
+      - name: Create and push the tag
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          here=$(git rev-parse HEAD)
+          there=$(git ls-remote --tags origin "refs/tags/$VERSION" | cut -f1)
+          if [[ -n "$there" ]]; then
+            if [[ "$there" == "$here" ]]; then
+              echo "Tag '$VERSION' is already on $here"
+              exit 0
+            fi
+            echo "Error: tag '$VERSION' is on $there, and this run is on $here"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$VERSION"
+          git push origin "$VERSION"
+          echo "Tag '$VERSION' created and pushed successfully"

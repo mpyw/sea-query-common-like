@@ -1,21 +1,81 @@
 name: Release
 
+# Show the target version in the run title, e.g. "Release 1.2.3".
+run-name: "Release ${{ inputs.version }}"
+
+# Dispatched, not triggered by the release being created.
+#
+# crates.io is where the canonical artifact lands, and a published version can
+# never be published again. A GitHub release freezes its tag, so creating one
+# before the publish succeeded would burn the version number on a run that
+# failed half way. The order here is publish, then release.
+#
+# crates.io matches the `workflow_ref` claim, which names the top level
+# workflow rather than the reusable one it called. Both entry points therefore
+# need a trusted publisher configuration: `tag_and_release.yaml` for the usual
+# path, and `release.yaml` for a retry dispatched on its own.
 on:
-  release:
-    types: [created]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g., 1.2.3) - tag must already exist"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: "Version to release (e.g., 1.2.3) - tag must already exist"
+        required: true
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
 
-jobs:
-  publish:
-    name: Publish to crates.io
-    runs-on: ubuntu-latest
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
 
+jobs:
+  # ===========================================================================
+  # Everything that can be checked without permission to publish.
+  #
+  # It is a job of its own so that its log is there to read before the `publish`
+  # job's environment gate is answered. An approval on the environment shows the
+  # run and not the diff, and reviewing the diff is the point.
+  # ===========================================================================
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      published: ${{ steps.plan.outputs.published }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
     steps:
-      - name: Checkout code
+      - name: Validate version format
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Error: Invalid version format '$VERSION'"
+            echo "Expected format: X.Y.Z or X.Y.Z-prerelease (e.g., 1.2.3, 1.2.0-rc.1)"
+            exit 1
+          fi
+          echo "Version format valid: $VERSION"
+
+      - name: Check tag exists
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if ! git ls-remote --tags "https://github.com/${{ github.repository }}" \
+            | grep -q "refs/tags/${VERSION}$"; then
+            echo "Error: Tag '$VERSION' does not exist"
+            echo "Please create the tag first using the 'Tag' workflow"
+            exit 1
+          fi
+          echo "Tag exists: $VERSION"
+
+      - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.version }}
           fetch-depth: 0
 
       - name: Setup Rust
@@ -27,70 +87,132 @@ jobs:
       - name: Run tests
         run: cargo test --all-features
 
-      - name: Verify package
+      - name: Verify the package
         run: cargo publish --dry-run
 
-      - name: Get previous tag
-        id: prev_tag
+      # A version already on crates.io cannot be published again, and a run
+      # that stopped after publishing has to be finishable.
+      - name: Work out whether this is already published
+        id: plan
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-          echo "tag=$PREV_TAG" >> $GITHUB_OUTPUT
-
-      - name: Generate diff for approval
-        run: |
-          CURRENT_TAG="${{ github.event.release.tag_name }}"
-          PREV_TAG="${{ steps.prev_tag.outputs.tag }}"
-
-          echo "## Changes in $CURRENT_TAG" > diff_output.md
-          echo "" >> diff_output.md
-
-          if [ -z "$PREV_TAG" ]; then
-            echo "First release - showing all files:" >> diff_output.md
-            echo "" >> diff_output.md
-            for file in $(git ls-files '*.rs' 'Cargo.toml'); do
-              echo "### \`$file\`" >> diff_output.md
-              echo '```rust' >> diff_output.md
-              head -100 "$file" >> diff_output.md
-              echo '```' >> diff_output.md
-              echo "" >> diff_output.md
-            done
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H 'User-Agent: sea-query-common-like release workflow' \
+            "https://crates.io/api/v1/crates/sea-query-common-like/$VERSION")
+          if [[ "$code" == "200" ]]; then
+            echo "$VERSION is already on crates.io"
+            echo "published=true" >> "$GITHUB_OUTPUT"
           else
-            echo "Comparing \`$PREV_TAG\` → \`$CURRENT_TAG\`" >> diff_output.md
-            echo "" >> diff_output.md
-
-            CHANGED_FILES=$(git diff --name-only "$PREV_TAG" HEAD -- '*.rs' 'Cargo.toml' 2>/dev/null || echo "")
-
-            if [ -z "$CHANGED_FILES" ]; then
-              echo "No source file changes detected." >> diff_output.md
-            else
-              for file in $CHANGED_FILES; do
-                echo "### \`$file\`" >> diff_output.md
-                echo '```diff' >> diff_output.md
-                git diff "$PREV_TAG" HEAD -- "$file" >> diff_output.md
-                echo '```' >> diff_output.md
-                echo "" >> diff_output.md
-              done
-            fi
+            echo "$VERSION is not published yet (HTTP $code)"
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [[ "$VERSION" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
 
-          cat diff_output.md
+      # What the old `manual-approval` step put in an issue. It is written here
+      # instead, where the reviewer of the environment gate can read it before
+      # answering.
+      - name: Show the source diff
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          prev=$(git tag --sort=-v:refname | grep -v "^${VERSION}$" | head -1 || true)
+          {
+            echo "## Changes in \`$VERSION\`"
+            echo
+            if [[ -z "$prev" ]]; then
+              echo "No earlier tag to compare against."
+            else
+              echo "Comparing \`$prev\` to \`$VERSION\`."
+              echo
+              changed=$(git diff --name-only "$prev" "$VERSION" -- '*.rs' 'Cargo.toml' || true)
+              if [[ -z "$changed" ]]; then
+                echo "No source file changes."
+              else
+                for file in $changed; do
+                  echo "### \`$file\`"
+                  echo '```diff'
+                  git diff "$prev" "$VERSION" -- "$file"
+                  echo '```'
+                  echo
+                done
+              fi
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$GITHUB_STEP_SUMMARY"
 
-      - name: Request approval
-        uses: trstringer/manual-approval@v1
+  # ===========================================================================
+  # The publish, and then the release that freezes the tag.
+  # ===========================================================================
+  publish:
+    needs: [plan]
+    runs-on: ubuntu-latest
+
+    # The repository settings can put a reviewer in front of this, and the
+    # trusted publisher configuration names the same environment.
+    environment: release
+
+    # Naming any permission replaces the whole default set, so both are here.
+    permissions:
+      # The OIDC token this exchanges for a crates.io one.
+      id-token: write
+      # `gh release create`.
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          secret: ${{ github.TOKEN }}
-          approvers: mpyw
-          minimum-approvals: 1
-          issue-title: "Approve crates.io publish: ${{ github.event.release.tag_name }}"
-          issue-body: |
-            Release **${{ github.event.release.tag_name }}** is ready to be published to crates.io.
+          ref: ${{ inputs.version }}
+          fetch-depth: 0
 
-            Please review the changes and comment `approve` or `deny`.
-          issue-body-file-path: diff_output.md
-          additional-approved-words: "lgtm,ship it"
-          exclude-workflow-initiator-as-approver: false
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # No token in this repository's secrets. The action asks GitHub for one
+      # that says which workflow is running, hands it to crates.io, and gets
+      # back one that lasts thirty minutes. Its post step revokes it.
+      #
+      # Run even when there is nothing left to publish. The exchange is what
+      # proves the trusted publisher configuration still describes this
+      # workflow, and a release that skipped it would leave that unanswered
+      # until the next one. It publishes nothing by itself.
+      - name: Authenticate with crates.io
+        id: auth
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
 
       - name: Publish to crates.io
-        run: cargo publish
+        if: needs.plan.outputs.published == 'false'
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo publish
+
+      - name: Already published
+        if: needs.plan.outputs.published == 'true'
+        run: echo "This version is already on crates.io"
+
+      # Last, because it freezes the tag. Everything that can still fail has
+      # happened by now. A release that is already there belongs to the run
+      # that got this far before, and is left alone.
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          REPO: ${{ github.repository }}
+          PRERELEASE: ${{ needs.plan.outputs.prerelease }}
+        run: |
+          if gh release view "$VERSION" --repo "$REPO" >/dev/null 2>&1; then
+            echo "Release '$VERSION' already exists"
+            exit 0
+          fi
+          args=(--repo "$REPO" --verify-tag --title "$VERSION" --generate-notes)
+          [[ "$PRERELEASE" == "true" ]] && args+=(--prerelease)
+          printf '%s\n' \
+            "| Crate | Install |" \
+            "| --- | --- |" \
+            "| \`sea-query-common-like\` | \`cargo add sea-query-common-like\` |" > notes.md
+          gh release create "$VERSION" "${args[@]}" --notes-file notes.md
