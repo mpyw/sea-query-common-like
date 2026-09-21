@@ -29,5 +29,10 @@ sea-query = { version = ">=0.31, <0.33", default-features = false }
 sea-orm = { version = ">=1.0, <1.2", features = ["macros"] }
 sea-query = ">=0.31, <0.33"
 sqlformat = ">=0.3.5, <0.6"
-sqlx = ">=0.7, <0.10"
-sqlx-postgres = ">=0.7, <0.9"
+# No code here uses `sqlx`. It is present so the compatibility matrix resolves a
+# real driver alongside this crate. Reach the Postgres driver through the
+# `postgres` feature, not through a direct `sqlx-postgres` dependency. A direct
+# dependency does not compile on 0.9. `sqlx` turns on `sqlx-core/offline`. That
+# feature adds `Executor::describe` to the trait. `sqlx-postgres/offline` stays
+# off, so the impl is missing.
+sqlx = { version = ">=0.7, <0.10", features = ["postgres"] }
