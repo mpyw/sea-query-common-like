@@ -43,7 +43,7 @@ jobs:
           - sea: { sea-orm: "1.1", sea-query: "0.32" }
             sqlx: "0.7"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup Rust stable toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Update dependencies
@@ -97,7 +97,7 @@ jobs:
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup Rust nightly toolchain
         uses: dtolnay/rust-toolchain@nightly
       - name: Install coverage tools
@@ -119,7 +119,7 @@ jobs:
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup Rust stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
